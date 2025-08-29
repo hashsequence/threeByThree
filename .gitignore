@@ -5,7 +5,6 @@
 *.bin
 threeBythreeApp
 threeByThreeApp
-threeBythreeApp
 server
 main
 # Ignore temporary files
@@ -16,3 +15,4 @@ main
 # Ignore macOS system files
 .DS_Store
 *.csv
+threeBythreeApp

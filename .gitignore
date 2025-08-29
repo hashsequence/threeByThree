@@ -14,3 +14,4 @@ main
 /build/
 # Ignore macOS system files
 .DS_Store
+*.csv

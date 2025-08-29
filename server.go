@@ -29,8 +29,10 @@ var tpl = template.Must(template.New("form").Parse(`
 		<label>Empty Row/Col Every N: <input type="number" id="nval" name="nval" min="1" required oninput="syncValue(this)"></label><br><br>
 		<input type="hidden" id="nrow" name="nrow" value="1">
 		<input type="hidden" id="ncol" name="ncol" value="1">
-		<label>Output CSV Name: <input type="text" name="outputcsv" required></label><br><br>
-		<input type="submit" value="Process">
+	<label><input type="checkbox" name="rotate" value="1"> Rotate isolated square matrices</label><br>
+	<label><input type="checkbox" name="transpose" value="1"> Transpose isolated square matrices</label><br><br>
+	<label>Output CSV Name: <input type="text" name="outputcsv" required></label><br><br>
+	<input type="submit" value="Process">
 	</form>
 	{{if .Output}}
 		<h2>Download Output:</h2>
@@ -48,6 +50,8 @@ func main() {
 }
 
 func formHandler(w http.ResponseWriter, r *http.Request) {
+	doRotate := r.FormValue("rotate") == "1"
+	doTranspose := r.FormValue("transpose") == "1"
 	var output string
 	if r.Method == http.MethodPost {
 		file, header, err := r.FormFile("inputcsv")
@@ -58,9 +62,9 @@ func formHandler(w http.ResponseWriter, r *http.Request) {
 		defer file.Close()
 
 		outputcsv := r.FormValue("outputcsv")
-	nval, _ := strconv.Atoi(r.FormValue("nval"))
-	nrow := nval
-	ncol := nval
+		nval, _ := strconv.Atoi(r.FormValue("nval"))
+		nrow := nval
+		ncol := nval
 
 		// Save uploaded file temporarily
 		infile := "tmp_" + header.Filename
@@ -73,7 +77,35 @@ func formHandler(w http.ResponseWriter, r *http.Request) {
 		io.Copy(f, file)
 
 		// Process CSV
-		processCSV(infile, nrow, ncol, outputcsv)
+		fcsv, err := os.Open(infile)
+		if err != nil {
+			http.Error(w, "Error opening input file", http.StatusInternalServerError)
+			return
+		}
+		defer fcsv.Close()
+		reader := csv.NewReader(fcsv)
+		records, err := reader.ReadAll()
+		if err != nil {
+			http.Error(w, "Error reading CSV", http.StatusInternalServerError)
+			return
+		}
+		records = addEmptyRowEveryN(records, nrow)
+		records = addEmptyColumnEveryN(records, ncol)
+		if doRotate {
+			records = rotateSquareMatrixCounterClockwise(records)
+		}
+		if doTranspose {
+			records = transposeAllIsolatedSquareMatrices(records)
+		}
+		out, err := os.Create(outputcsv)
+		if err != nil {
+			http.Error(w, "Error creating output file", http.StatusInternalServerError)
+			return
+		}
+		defer out.Close()
+		writer := csv.NewWriter(out)
+		writer.WriteAll(records)
+		writer.Flush()
 		output = outputcsv
 	}
 	tpl.Execute(w, map[string]string{"Output": output})
@@ -100,7 +132,12 @@ func processCSV(input string, nRow, nCol int, output string) {
 	}
 	records = addEmptyRowEveryN(records, nRow)
 	records = addEmptyColumnEveryN(records, nCol)
-	records = rotateSquareMatrixCounterClockwise(records)
+	// If transpose is requested, call transposeAllIsolatedSquareMatrices
+	if os.Getenv("TRANSPOSE") == "1" {
+		records = transposeAllIsolatedSquareMatrices(records)
+	} else {
+		records = rotateSquareMatrixCounterClockwise(records)
+	}
 	out, err := os.Create(output)
 	if err != nil {
 		return
@@ -110,7 +147,6 @@ func processCSV(input string, nRow, nCol int, output string) {
 	writer.WriteAll(records)
 	writer.Flush()
 }
-
 
 // addEmptyRowEveryN adds an empty row every n rows
 func addEmptyRowEveryN(records [][]string, n int) [][]string {
@@ -166,19 +202,19 @@ func rotate3x3CounterClockwise(records [][]string) [][]string {
 			}
 			// Check all 8 neighbors are nonempty
 			if records[i-1][j-1] == "" || records[i-1][j] == "" || records[i-1][j+1] == "" ||
-			   records[i][j-1] == ""   || records[i][j+1] == ""   ||
-			   records[i+1][j-1] == "" || records[i+1][j] == "" || records[i+1][j+1] == "" {
+				records[i][j-1] == "" || records[i][j+1] == "" ||
+				records[i+1][j-1] == "" || records[i+1][j] == "" || records[i+1][j+1] == "" {
 				continue
 			}
 			// Perform counterclockwise rotation
 			result[i-1][j-1] = records[i-1][j+1] // top left <- top right
-			result[i-1][j]   = records[i][j+1]   // top center <- middle right
+			result[i-1][j] = records[i][j+1]     // top center <- middle right
 			result[i-1][j+1] = records[i+1][j+1] // top right <- bottom right
-			result[i][j+1]   = records[i+1][j]   // middle right <- bottom center
+			result[i][j+1] = records[i+1][j]     // middle right <- bottom center
 			result[i+1][j+1] = records[i+1][j-1] // bottom right <- bottom left
-			result[i+1][j]   = records[i][j-1]   // bottom center <- middle left
+			result[i+1][j] = records[i][j-1]     // bottom center <- middle left
 			result[i+1][j-1] = records[i-1][j-1] // bottom left <- top left
-			result[i][j-1]   = records[i-1][j]   // middle left <- top center
+			result[i][j-1] = records[i-1][j]     // middle left <- top center
 			// center cell remains unchanged
 		}
 	}
@@ -187,81 +223,81 @@ func rotate3x3CounterClockwise(records [][]string) [][]string {
 
 // rotateSquareMatrixCounterClockwise rotates every square submatrix of nonempty cells counterclockwise 90 degrees
 func rotateSquareMatrixCounterClockwise(records [][]string) [][]string {
-    rows := len(records)
-    if rows == 0 {
-        return records
-    }
-    cols := len(records[0])
-    minDim := rows
-    if cols < rows {
-        minDim = cols
-    }
-    // For every possible size (2x2 up to minDim x minDim)
-    for size := 2; size <= minDim; size++ {
-        for i := 0; i <= rows-size; i++ {
-            for j := 0; j <= cols-size; j++ {
-                // Check if all cells in the submatrix are nonempty
-                allNonEmpty := true
-                for r := i; r < i+size; r++ {
-                    for c := j; c < j+size; c++ {
-                        if records[r][c] == "" {
-                            allNonEmpty = false
-                            break
-                        }
-                    }
-                    if !allNonEmpty {
-                        break
-                    }
-                }
-                if !allNonEmpty {
-                    continue
-                }
-                // Check if the submatrix is surrounded by empty cells or the border
-                surrounded := true
-                // Top border
-                if i > 0 {
-                    for c := j; c < j+size; c++ {
-                        if records[i-1][c] != "" {
-                            surrounded = false
-                            break
-                        }
-                    }
-                }
-                // Bottom border
-                if surrounded && i+size < rows {
-                    for c := j; c < j+size; c++ {
-                        if records[i+size][c] != "" {
-                            surrounded = false
-                            break
-                        }
-                    }
-                }
-                // Left border
-                if surrounded && j > 0 {
-                    for r := i; r < i+size; r++ {
-                        if records[r][j-1] != "" {
-                            surrounded = false
-                            break
-                        }
-                    }
-                }
-                // Right border
-                if surrounded && j+size < cols {
-                    for r := i; r < i+size; r++ {
-                        if records[r][j+size] != "" {
-                            surrounded = false
-                            break
-                        }
-                    }
-                }
-                if surrounded {
-                    // Rotate the submatrix counterclockwise
-                    rotateSubMatrixCCW(records, i, j, size)
-                }
-            }
-        }
-    }
-    return records
+	rows := len(records)
+	if rows == 0 {
+		return records
+	}
+	cols := len(records[0])
+	minDim := rows
+	if cols < rows {
+		minDim = cols
+	}
+	// For every possible size (2x2 up to minDim x minDim)
+	for size := 2; size <= minDim; size++ {
+		for i := 0; i <= rows-size; i++ {
+			for j := 0; j <= cols-size; j++ {
+				// Check if all cells in the submatrix are nonempty
+				allNonEmpty := true
+				for r := i; r < i+size; r++ {
+					for c := j; c < j+size; c++ {
+						if records[r][c] == "" {
+							allNonEmpty = false
+							break
+						}
+					}
+					if !allNonEmpty {
+						break
+					}
+				}
+				if !allNonEmpty {
+					continue
+				}
+				// Check if the submatrix is surrounded by empty cells or the border
+				surrounded := true
+				// Top border
+				if i > 0 {
+					for c := j; c < j+size; c++ {
+						if records[i-1][c] != "" {
+							surrounded = false
+							break
+						}
+					}
+				}
+				// Bottom border
+				if surrounded && i+size < rows {
+					for c := j; c < j+size; c++ {
+						if records[i+size][c] != "" {
+							surrounded = false
+							break
+						}
+					}
+				}
+				// Left border
+				if surrounded && j > 0 {
+					for r := i; r < i+size; r++ {
+						if records[r][j-1] != "" {
+							surrounded = false
+							break
+						}
+					}
+				}
+				// Right border
+				if surrounded && j+size < cols {
+					for r := i; r < i+size; r++ {
+						if records[r][j+size] != "" {
+							surrounded = false
+							break
+						}
+					}
+				}
+				if surrounded {
+					// Rotate the submatrix counterclockwise
+					rotateSubMatrixCCW(records, i, j, size)
+				}
+			}
+		}
+	}
+	return records
 }
 
 // rotateSubMatrixCCW rotates a square submatrix in place
@@ -286,3 +322,90 @@ func rotateSubMatrixCCW(records [][]string, startRow, startCol, size int) {
 	}
 }
 
+// transposeAllIsolatedSquareMatrices transposes all isolated square matrices surrounded by empty cells or the border
+func transposeAllIsolatedSquareMatrices(records [][]string) [][]string {
+	// ...existing code...
+	// transposeSubMatrix transposes a square submatrix in place
+
+	rows := len(records)
+	if rows == 0 {
+		return records
+	}
+	cols := len(records[0])
+	minDim := rows
+	if cols < rows {
+		minDim = cols
+	}
+	for size := 2; size <= minDim; size++ {
+		for i := 0; i <= rows-size; i++ {
+			for j := 0; j <= cols-size; j++ {
+				// Check if all cells in the submatrix are nonempty
+				allNonEmpty := true
+				for r := i; r < i+size; r++ {
+					for c := j; c < j+size; c++ {
+						if records[r][c] == "" {
+							allNonEmpty = false
+							break
+						}
+					}
+					if !allNonEmpty {
+						break
+					}
+				}
+				if !allNonEmpty {
+					continue
+				}
+				// Check if the submatrix is surrounded by empty cells or the border
+				surrounded := true
+				// Top border
+				if i > 0 {
+					for c := j; c < j+size; c++ {
+						if records[i-1][c] != "" {
+							surrounded = false
+							break
+						}
+					}
+				}
+				// Bottom border
+				if surrounded && i+size < rows {
+					for c := j; c < j+size; c++ {
+						if records[i+size][c] != "" {
+							surrounded = false
+							break
+						}
+					}
+				}
+				// Left border
+				if surrounded && j > 0 {
+					for r := i; r < i+size; r++ {
+						if records[r][j-1] != "" {
+							surrounded = false
+							break
+						}
+					}
+				}
+				// Right border
+				if surrounded && j+size < cols {
+					for r := i; r < i+size; r++ {
+						if records[r][j+size] != "" {
+							surrounded = false
+							break
+						}
+					}
+				}
+				if surrounded {
+					transposeSubMatrix(records, i, j, size)
+				}
+			}
+		}
+	}
+	return records
+}
+
+func transposeSubMatrix(records [][]string, startRow, startCol, size int) {
+	for i := 0; i < size; i++ {
+		for j := i + 1; j < size; j++ {
+			records[startRow+i][startCol+j], records[startRow+j][startCol+i] = records[startRow+j][startCol+i], records[startRow+i][startCol+j]
+		}
+	}
+}

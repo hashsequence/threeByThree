@@ -5,6 +5,7 @@
 *.bin
 threeBythreeApp
 threeByThreeApp
+threeBythreeApp
 server
 main
 # Ignore temporary files

@@ -12,3 +12,5 @@ main
 *.temp
 # Ignore build artifacts
 /build/
+# Ignore macOS system files
+.DS_Store

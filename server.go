@@ -15,13 +15,20 @@ var tpl = template.Must(template.New("form").Parse(`
 <html>
 <head>
 	<title>threeBythree CSV Processor</title>
+    <script>
+    function syncValue(e) {
+        document.getElementById('nrow').value = e.value;
+        document.getElementById('ncol').value = e.value;
+    }
+    </script>
 </head>
 <body>
 	<h1>threeBythree CSV Processor</h1>
 	<form method="POST" enctype="multipart/form-data">
 		<label>Input CSV: <input type="file" name="inputcsv" required></label><br><br>
-		<label>Empty Row Every N: <input type="number" name="nrow" min="1" required></label><br><br>
-		<label>Empty Col Every N: <input type="number" name="ncol" min="1" required></label><br><br>
+		<label>Empty Row/Col Every N: <input type="number" id="nval" name="nval" min="1" required oninput="syncValue(this)"></label><br><br>
+		<input type="hidden" id="nrow" name="nrow" value="1">
+		<input type="hidden" id="ncol" name="ncol" value="1">
 		<label>Output CSV Name: <input type="text" name="outputcsv" required></label><br><br>
 		<input type="submit" value="Process">
 	</form>
@@ -51,8 +58,9 @@ func formHandler(w http.ResponseWriter, r *http.Request) {
 		defer file.Close()
 
 		outputcsv := r.FormValue("outputcsv")
-		nrow, _ := strconv.Atoi(r.FormValue("nrow"))
-		ncol, _ := strconv.Atoi(r.FormValue("ncol"))
+	nval, _ := strconv.Atoi(r.FormValue("nval"))
+	nrow := nval
+	ncol := nval
 
 		// Save uploaded file temporarily
 		infile := "tmp_" + header.Filename

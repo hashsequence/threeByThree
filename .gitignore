@@ -1,0 +1,14 @@
+# Ignore executable binaries
+*.exe
+*.out
+*.app
+*.bin
+threeBythreeApp
+threeByThreeApp
+server
+main
+# Ignore temporary files
+*.tmp
+*.temp
+# Ignore build artifacts
+/build/
